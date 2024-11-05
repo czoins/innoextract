@@ -5,34 +5,48 @@ on:
     # Runs on every pushed commit
 
 jobs:
+
   build:
-    runs-on: ubuntu-latest
-    # Forced to run on debian:buster since debian:bullseye's Boost is not
-    # functional to compile executables statically with bz2 and zlib.
-    container: debian:buster
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
     steps:
-      - name: Checkout repository
+      - name: Checkout code
         uses: actions/checkout@v4
-      - name: Install dependencies
+
+      - name: Setup Environment
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: mingw-w64-x86_64-gcc mingw-w64-x86_64-toolchain base-devel mingw-w64-x86_64-make mingw-w64-x86_64-cmake mingw-w64-x86_64-boost mingw-w64-x86_64-zlib mingw-w64-x86_64-bzip2 mingw-w64-x86_64-xz
+
+      - name: Build
         run: |
-          apt-get update
-          apt-get install -y build-essential cmake libboost-all-dev liblzma-dev
-          # Only because we are running on debian:buster
-          apt-get install -y zlib1g-dev libbz2-dev
-      - name: Build innoextract
-        run: |
-          mkdir -p build 
+          mkdir build
           cd build
-          cmake -DUSE_STATIC_LIBS=ON ..
-          make
-          strip innoextract
+          cmake -G"MSYS Makefiles" -DUSE_LTO=OFF -DCMAKE_EXE_LINKER_FLAGS=-static -DCMAKE_BUILD_TYPE=Release -DUSE_STATIC_LIBS=ON ..
+          mingw32-make -j8
+          strip innoextract.exe
+
+      - name: Release files
+        shell: cmd
+        run: |
+          mkdir build\release
+          xcopy "build\innoextract.exe" "build\release" /Y
+          xcopy "D:\a\_temp\msys64\mingw64\bin\*.dll" "build\release" /Y
+          powershell -c "Compress-Archive -Path .\build\release\libbz2-1.dll, .\build\innoextract.exe -DestinationPath innoextract-windows.zip"
+
       - name: Archive artifacts
         uses: actions/upload-artifact@v4
         with:
           name: innoextract
-          path: build/innoextract
+          path: build/release
+          retention-days: 5
+
       - name: Release
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          files: build/innoextract
+          files: innoextract-windows.zip
